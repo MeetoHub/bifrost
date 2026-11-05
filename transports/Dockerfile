@@ -37,6 +37,11 @@
 
   COPY --from=ui-builder /app/out ./bifrost-http/ui
 
+# The transports module imports github.com/maximhq/bifrost/framework, which is a
+# sibling module; upstream's Dockerfile copies only transports, so wire it here.
+COPY framework/ /framework/
+RUN go mod edit -replace github.com/maximhq/bifrost/framework=/framework
+
   # Build the binary with CGO enabled and static SQLite linking
   ENV GOWORK=off
   ARG VERSION=unknown
