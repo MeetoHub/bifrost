@@ -27,27 +27,23 @@
   # Set environment for CGO-enabled build (required for go-sqlite3)
   ENV CGO_ENABLED=1 GOOS=linux
 
-  COPY transports/go.mod transports/go.sum ./
-  RUN ls
-  RUN cat go.mod
-  RUN go mod download
+  # Build from the checkout own modules: transports depends on framework and core by
+  # path in a workspace, and dev is mid-migration so the published module versions
+  # lag behind. Copy the whole tree and build through go.work.
+  RUN apk add --no-cache git
 
-  # Copy source code and dependencies
-  COPY transports/ ./
+  COPY . /src
+  COPY --from=ui-builder /app/out /src/transports/bifrost-http/ui
 
-  COPY --from=ui-builder /app/out ./bifrost-http/ui
+  WORKDIR /src
+  RUN go work init ./cli ./core ./framework ./transports \
+    && for d in ./plugins/*/; do [ -f "$d/go.mod" ] && go work use "$d" || true; done
 
-# The transports module imports github.com/maximhq/bifrost/framework, which is a
-# sibling module; upstream's Dockerfile copies only transports, so wire it here.
-COPY framework/ /framework/
-RUN go mod edit -replace github.com/maximhq/bifrost/framework=/framework
-
-  # Build the binary with CGO enabled and static SQLite linking
-  ENV GOWORK=off
+  WORKDIR /src/transports
   ARG VERSION=unknown
   RUN go build \
     -ldflags="-w -s -X main.Version=v${VERSION} -extldflags '-static'" \
-    -a -trimpath \
+    -trimpath \
     -tags "sqlite_static" \
     -o /app/main \
     ./bifrost-http
@@ -68,7 +64,7 @@ RUN go mod edit -replace github.com/maximhq/bifrost/framework=/framework
 
   # Create data directory and set up user
   COPY --from=builder /app/main .
-  COPY --from=builder /app/docker-entrypoint.sh .
+  COPY --from=builder /src/transports/docker-entrypoint.sh .
 
   # Getting arguments
   ARG ARG_APP_PORT=8080
